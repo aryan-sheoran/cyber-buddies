@@ -181,23 +181,29 @@ public:
         {
             throw FileAccessException(fileType + " path cannot be empty");
         }
+
         if (!Utils::fileExists(filename))
         {
-            throw FileAccessException(fileType + " not found: " + filename);
+            throw FileAccessException(fileType + " not found or not accessible: " + filename);
         }
     }
 
     static size_t validateAndCalculateMaxSize(size_t hiddenSize, size_t hostSize)
     {
+        // Check minimum host size
         if (hostSize < Config::MIN_HOST_SIZE)
         {
-            throw FileSizeException("Host file too small. Minimum: " +
-                                    Utils::formatBytes(Config::MIN_HOST_SIZE));
+            throw FileSizeException(
+                "Host file too small. Minimum size: " +
+                Utils::formatBytes(Config::MIN_HOST_SIZE));
         }
 
-        size_t maxHiddenSize = static_cast<size_t>(hostSize * Config::MAX_HIDDEN_SIZE_RATIO);
-        size_t headerSize = sizeof(StegoHeader);
+        // Calculate maximum allowed hidden size
+        size_t maxHiddenSize = static_cast<size_t>(
+            hostSize * Config::MAX_HIDDEN_SIZE_RATIO);
 
+        // Account for header size
+        size_t headerSize = sizeof(StegoHeader);
         if (maxHiddenSize < headerSize)
         {
             throw FileSizeException("Host file too small to hide any data");
@@ -205,11 +211,14 @@ public:
 
         maxHiddenSize -= headerSize;
 
+        // Check if hidden file fits
         if (hiddenSize > maxHiddenSize)
         {
             throw FileSizeException(
-                "File to hide (" + Utils::formatBytes(hiddenSize) +
-                ") exceeds maximum (" + Utils::formatBytes(maxHiddenSize) + ")");
+                "The file to hide exceeds the allowable size.\n" +
+                string("  File size: ") + Utils::formatBytes(hiddenSize) + "\n" +
+                string("  Maximum allowed: ") + Utils::formatBytes(maxHiddenSize) + "\n" +
+                string("  Please choose a smaller file or a larger host file."));
         }
 
         return maxHiddenSize;
@@ -227,13 +236,15 @@ public:
         ifstream file(filename, ios::binary);
         if (!file.is_open())
         {
-            throw FileAccessException("Cannot open file: " + filename);
+            throw FileAccessException("Cannot open file for reading: " + filename);
         }
 
+        // Get file size
         file.seekg(0, ios::end);
         size_t size = file.tellg();
         file.seekg(0, ios::beg);
 
+        // Read file data
         vector<unsigned char> data(size);
         file.read(reinterpret_cast<char *>(data.data()), size);
 
@@ -251,7 +262,7 @@ public:
         ofstream file(filename, ios::binary);
         if (!file.is_open())
         {
-            throw FileAccessException("Cannot create file: " + filename);
+            throw FileAccessException("Cannot create output file: " + filename);
         }
 
         file.write(reinterpret_cast<const char *>(data.data()), data.size());
@@ -320,28 +331,55 @@ public:
 
     void hideFile()
     {
-        // Validate files
+        cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" << endl;
+        cout << "  INITIATING FILE HIDING PROCESS" << endl;
+        cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+             << endl;
+
+        // Step 1: Validate file access
+        cout << "[1/5] Validating file access..." << endl;
         FileValidator::validateFileAccess(hiddenFilePath, "File to hide");
         FileValidator::validateFileAccess(hostFilePath, "Host file");
+        cout << "      ✓ Files validated successfully\n"
+             << endl;
 
-        // Get file sizes
+        // Step 2: Get file sizes
+        cout << "[2/5] Analyzing file sizes..." << endl;
         size_t hiddenSize = Utils::getFileSize(hiddenFilePath);
         size_t hostSize = Utils::getFileSize(hostFilePath);
 
-        // Validate size constraints
-        FileValidator::validateAndCalculateMaxSize(hiddenSize, hostSize);
+        cout << "      • File to hide: " << Utils::formatBytes(hiddenSize)
+             << " (" << Utils::extractFilename(hiddenFilePath) << ")" << endl;
+        cout << "      • Host file: " << Utils::formatBytes(hostSize)
+             << " (" << Utils::extractFilename(hostFilePath) << ")" << endl;
 
-        // Read files
+        // Step 3: Validate size constraints
+        cout << "\n[3/5] Checking size constraints..." << endl;
+        size_t maxAllowed = FileValidator::validateAndCalculateMaxSize(hiddenSize, hostSize);
+        double utilizationPercent = (static_cast<double>(hiddenSize) / maxAllowed) * 100.0;
+        cout << "      ✓ Size check passed" << endl;
+        cout << "      • Capacity utilization: " << fixed << setprecision(1)
+             << utilizationPercent << "%" << endl;
+        cout << "      • Remaining capacity: "
+             << Utils::formatBytes(maxAllowed - hiddenSize) << "\n"
+             << endl;
+
+        // Step 4: Read files
+        cout << "[4/5] Reading files..." << endl;
         vector<unsigned char> hostData = FileIOManager::readFile(hostFilePath);
         vector<unsigned char> hiddenData = FileIOManager::readFile(hiddenFilePath);
+        cout << "      ✓ Files loaded into memory\n"
+             << endl;
 
-        // Create header
+        // Step 5: Create output with embedded data
+        cout << "[5/5] Embedding hidden file..." << endl;
         StegoHeader header = createHeader(hiddenFilePath, hiddenSize);
         vector<unsigned char> headerData = serializeHeader(header);
 
-        // Construct output
+        // Construct output: host + header + hidden
         vector<unsigned char> output;
         output.reserve(hostData.size() + headerData.size() + hiddenData.size());
+
         output.insert(output.end(), hostData.begin(), hostData.end());
         output.insert(output.end(), headerData.begin(), headerData.end());
         output.insert(output.end(), hiddenData.begin(), hiddenData.end());
@@ -352,28 +390,49 @@ public:
         // Write output
         FileIOManager::writeFile(finalOutputPath, output);
 
-        cout << "SUCCESS: File encoded successfully" << endl;
-        cout << "Output: " << finalOutputPath << endl;
-        cout << "Size: " << Utils::formatBytes(output.size()) << endl;
+        cout << "      ✓ File embedded successfully" << endl;
+        cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" << endl;
+        cout << "  ✓ OPERATION COMPLETED SUCCESSFULLY" << endl;
+        cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+             << endl;
+        cout << "Output file: " << finalOutputPath << endl;
+        cout << "Total size: " << Utils::formatBytes(output.size()) << endl;
+        cout << "Hidden file: " << header.filename << " ("
+             << Utils::formatBytes(hiddenSize) << ")" << endl;
     }
 
     void extractFile()
     {
-        // Validate file
+        cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" << endl;
+        cout << "  INITIATING FILE EXTRACTION PROCESS" << endl;
+        cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+             << endl;
+
+        // Step 1: Validate file access
+        cout << "[1/4] Validating file access..." << endl;
         FileValidator::validateFileAccess(hostFilePath, "Stego file");
+        cout << "      ✓ File validated\n"
+             << endl;
 
-        // Read file
+        // Step 2: Read file
+        cout << "[2/4] Reading stego file..." << endl;
         vector<unsigned char> data = FileIOManager::readFile(hostFilePath);
+        size_t fileSize = data.size();
+        cout << "      • File size: " << Utils::formatBytes(fileSize) << "\n"
+             << endl;
 
+        // Step 3: Extract and validate header
+        cout << "[3/4] Searching for hidden data..." << endl;
         if (data.size() < sizeof(StegoHeader))
         {
             throw InvalidFormatException("File too small to contain hidden data");
         }
 
-        // Search for header
-        size_t headerOffset = 0;
-        bool found = false;
+        // Header is located after original host file data
+        size_t headerOffset = data.size() - sizeof(StegoHeader);
 
+        // Search backwards for header signature
+        bool found = false;
         for (size_t i = data.size() - sizeof(StegoHeader); i > 0; i--)
         {
             vector<unsigned char> potentialHeader(data.begin() + i,
@@ -393,7 +452,6 @@ public:
             throw InvalidFormatException("No hidden data found in file");
         }
 
-        // Extract header
         vector<unsigned char> headerData(data.begin() + headerOffset,
                                          data.begin() + headerOffset + sizeof(StegoHeader));
         StegoHeader header = deserializeHeader(headerData);
@@ -403,7 +461,14 @@ public:
             throw InvalidFormatException("Invalid or corrupted header");
         }
 
-        // Extract hidden data
+        cout << "      ✓ Hidden data located" << endl;
+        cout << "      • Original filename: " << header.filename << endl;
+        cout << "      • Hidden file size: "
+             << Utils::formatBytes(header.hiddenFileSize) << "\n"
+             << endl;
+
+        // Step 4: Extract hidden data
+        cout << "[4/4] Extracting hidden file..." << endl;
         size_t hiddenDataOffset = headerOffset + sizeof(StegoHeader);
 
         if (hiddenDataOffset + header.hiddenFileSize > data.size())
@@ -419,10 +484,13 @@ public:
 
         FileIOManager::writeFile(extractedFilename, hiddenData);
 
-        cout << "SUCCESS: File extracted successfully" << endl;
-        cout << "Output: " << extractedFilename << endl;
-        cout << "Original filename: " << header.filename << endl;
-        cout << "Size: " << Utils::formatBytes(hiddenData.size()) << endl;
+        cout << "      ✓ File extracted successfully" << endl;
+        cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" << endl;
+        cout << "  ✓ EXTRACTION COMPLETED SUCCESSFULLY" << endl;
+        cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+             << endl;
+        cout << "Extracted file: " << extractedFilename << endl;
+        cout << "File size: " << Utils::formatBytes(hiddenData.size()) << endl;
     }
 };
 

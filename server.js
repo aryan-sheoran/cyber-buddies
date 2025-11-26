@@ -62,8 +62,8 @@ app.post('/api/encode', upload.fields([
 
     // Call your C++ executable
     // Adjust the command based on your C++ program's interface
-    // Format: stego.exe encode <cover_image> <secret_file> <output_image>
-    const command = `stego.exe encode "${coverImage}" "${secretFile}" "${outputImage}"`;
+    // Format: stego_cli.exe encode <cover_image> <secret_file> <output_image>
+    const command = `stego_cli.exe encode "${coverImage}" "${secretFile}" "${outputImage}"`;
 
     exec(command, (error, stdout, stderr) => {
       // Clean up uploaded files
@@ -85,11 +85,20 @@ app.post('/api/encode', upload.fields([
 
       console.log('Encoding successful:', stdout);
 
+      // Parse the actual output filename from stdout
+      // The C++ program outputs: "Output file: <actual_filename>"
+      let actualFilename = path.basename(outputImage);
+      const match = stdout.match(/Output file:\s*(.+)/i);
+      if (match && match[1]) {
+        const outputPath = match[1].trim();
+        actualFilename = path.basename(outputPath);
+      }
+
       res.json({
         success: true,
         message: 'File encoded successfully',
-        outputFile: outputImage.replace('./', '/'),
-        filename: path.basename(outputImage)
+        outputFile: '/output/' + actualFilename,
+        filename: actualFilename
       });
     });
   } catch (error) {
@@ -118,8 +127,8 @@ app.post('/api/decode', upload.single('stegoImage'), (req, res) => {
     console.log('Decoding file:', { stegoImage, outputFile });
 
     // Call your C++ executable
-    // Format: stego.exe decode <stego_image> <output_file>
-    const command = `stego.exe decode "${stegoImage}" "${outputFile}"`;
+    // Format: stego_cli.exe decode <stego_image> <output_file>
+    const command = `stego_cli.exe decode "${stegoImage}" "${outputFile}"`;
 
     exec(command, (error, stdout, stderr) => {
       // Clean up uploaded file
@@ -140,11 +149,33 @@ app.post('/api/decode', upload.single('stegoImage'), (req, res) => {
 
       console.log('Decoding successful:', stdout);
 
+      // Parse the actual output filename from stdout
+      // The C++ program outputs: "Extracted file: <actual_filename>"
+      let actualFilename = path.basename(outputFile);
+      const match = stdout.match(/Extracted file:\s*(.+)/i);
+      if (match && match[1]) {
+        const extractedPath = match[1].trim();
+        actualFilename = path.basename(extractedPath);
+      } else {
+        // Fallback: scan output directory for files matching the pattern
+        const outputDir = path.dirname(outputFile);
+        const baseFilename = path.basename(outputFile);
+        try {
+          const files = fs.readdirSync(outputDir);
+          const matchingFile = files.find(f => f.startsWith(baseFilename));
+          if (matchingFile) {
+            actualFilename = matchingFile;
+          }
+        } catch (scanError) {
+          console.error('Error scanning output directory:', scanError);
+        }
+      }
+
       res.json({
         success: true,
         message: 'File decoded successfully',
-        outputFile: outputFile.replace('./', '/'),
-        filename: path.basename(outputFile)
+        outputFile: '/output/' + actualFilename,
+        filename: actualFilename
       });
     });
   } catch (error) {
